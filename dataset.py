@@ -4,9 +4,10 @@ from torch.utils.data import Dataset
 
 
 class ProielDataset(Dataset):
-    def __init__(self, file, label='pos'):
+    def __init__(self, file, label='pos', max_sent_size=128):
         self.file = file
         self.label = label
+        self.max_sent_size = max_sent_size
         self.X, self.y, self.vocab_mapping, self.label_mapping = self.read_json()
 
     def read_json(self):
@@ -18,13 +19,13 @@ class ProielDataset(Dataset):
         sentences = data['sentences']
 
         vocabulary = list(set([t['word'].lower() for s in sentences for t in s]))
-        vocab_mapping = {v: k for k, v in enumerate(vocabulary)}
+        vocab_mapping = {v: k+1 for k, v in enumerate(vocabulary)}
 
         labels = list(set([t[self.label].lower() for s in sentences for t in s]))
-        label_mapping = {v: k for k, v in enumerate(labels)}
+        label_mapping = {v: k+1 for k, v in enumerate(labels)}
 
-        X = [[vocab_mapping[t['word'].lower()] for t in s] for s in sentences]
-        y = [[label_mapping[t[self.label].lower()] for t in s] for s in sentences]
+        X = [[vocab_mapping[t['word'].lower()] for t in s] for s in sentences if len(s) < self.max_sent_size]
+        y = [[label_mapping[t[self.label].lower()] for t in s] for s in sentences  if len(s) < self.max_sent_size]
 
         return X, y, vocab_mapping, label_mapping
 
