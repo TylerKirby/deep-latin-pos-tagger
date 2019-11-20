@@ -1,10 +1,11 @@
 import json
 
+import numpy as np
 from torch.utils.data import Dataset
 
 
 class ProielDataset(Dataset):
-    def __init__(self, file, label='pos', max_sent_size=128):
+    def __init__(self, file, label='pos', max_sent_size=32):
         self.file = file
         self.label = label
         self.max_sent_size = max_sent_size
@@ -16,18 +17,28 @@ class ProielDataset(Dataset):
 
         with open(self.file) as f:
             data = json.load(f)
-        sentences = data['sentences']
+        sentences = [s for s in data['sentences'] if len(s) < self.max_sent_size]
 
         vocabulary = list(set([t['word'].lower() for s in sentences for t in s]))
         vocab_mapping = {v: k+1 for k, v in enumerate(vocabulary)}
+        vocab_mapping['pad_token'] = 0
 
         labels = list(set([t[self.label].lower() for s in sentences for t in s]))
         label_mapping = {v: k+1 for k, v in enumerate(labels)}
+        label_mapping['pad_token'] = 0
 
-        X = [[vocab_mapping[t['word'].lower()] for t in s] for s in sentences if len(s) < self.max_sent_size]
-        y = [[label_mapping[t[self.label].lower()] for t in s] for s in sentences  if len(s) < self.max_sent_size]
+        X = [self.pad_data([vocab_mapping[t['word'].lower()] for t in s]) for s in sentences]
+        y = [self.pad_data([label_mapping[t[self.label].lower()] for t in s]) for s in sentences]
 
         return X, y, vocab_mapping, label_mapping
+
+    def pad_data(self, s):
+        padded = np.zeros((self.max_sent_size,), dtype=np.int64)
+        if len(s) > self.max_sent_size:
+            padded[:] = s[:self.max_sent_size]
+        else:
+            padded[:len(s)] = s
+        return padded
 
     def decode(self, sequence, type='X'):
         if type == 'X':
