@@ -4,3 +4,4 @@ proiel/
 venv/
 .idea/
 *.json
+__pycache__/

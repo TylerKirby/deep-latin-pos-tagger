@@ -3,3 +3,5 @@ numpy
 cltk
 jupyter
 tqdm
+allennlp
+comet_ml
