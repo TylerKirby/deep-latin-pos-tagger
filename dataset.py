@@ -5,11 +5,10 @@ from torch.utils.data import Dataset
 
 
 class ProielDataset(Dataset):
-    def __init__(self, file, label='pos', max_sent_size=32):
+    def __init__(self, file, label='pos'):
         self.file = file
         self.label = label
-        self.max_sent_size = max_sent_size
-        self.X, self.y, self.vocab_mapping, self.label_mapping = self.read_json()
+        self.X, self.X_lengths, self.y, self.y_lengths, self.vocab_mapping, self.label_mapping = self.read_json()
 
     def read_json(self):
         if self.label not in ['pos', 'morph']:
@@ -17,7 +16,7 @@ class ProielDataset(Dataset):
 
         with open(self.file) as f:
             data = json.load(f)
-        sentences = [s for s in data['sentences'] if len(s) < self.max_sent_size]
+        sentences = [s for s in data['sentences']]
 
         vocabulary = list(set([t['word'].lower() for s in sentences for t in s]))
         vocab_mapping = {v: k+1 for k, v in enumerate(vocabulary)}
@@ -27,17 +26,19 @@ class ProielDataset(Dataset):
         label_mapping = {v: k+1 for k, v in enumerate(labels)}
         label_mapping['pad_token'] = 0
 
-        X = [self.pad_data([vocab_mapping[t['word'].lower()] for t in s]) for s in sentences]
-        y = [self.pad_data([label_mapping[t[self.label].lower()] for t in s]) for s in sentences]
+        X_lengths = [len(s) for s in sentences]
+        y_lengths = [len(s) for s in sentences]
 
-        return X, y, vocab_mapping, label_mapping
+        max_token_size = max(X_lengths)
 
-    def pad_data(self, s):
-        padded = np.zeros((self.max_sent_size,), dtype=np.int64)
-        if len(s) > self.max_sent_size:
-            padded[:] = s[:self.max_sent_size]
-        else:
-            padded[:len(s)] = s
+        X = [self.pad_data([vocab_mapping[t['word'].lower()] for t in s], max_token_size) for s in sentences]
+        y = [self.pad_data([label_mapping[t[self.label].lower()] for t in s], max_token_size) for s in sentences]
+
+        return X, X_lengths, y, y_lengths, vocab_mapping, label_mapping
+
+    def pad_data(self, s, max_token_size):
+        padded = np.zeros((max_token_size,), dtype=np.int64)
+        padded[:len(s)] = s
         return padded
 
     def decode(self, sequence, type='X'):
@@ -60,6 +61,8 @@ if __name__ == '__main__':
     print(ds[1])
     print(ds.decode(ds[1][0]))
     print(ds.decode(ds[1][1], type='y'))
+    print(ds.X_lengths[1])
+    print(ds.y_lengths[1])
 
         
     
