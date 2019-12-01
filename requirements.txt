@@ -5,3 +5,4 @@ jupyter
 tqdm
 allennlp
 comet_ml
+sklearn

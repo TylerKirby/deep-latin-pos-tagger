@@ -10,6 +10,7 @@ import torch
 from allennlp.modules.augmented_lstm import AugmentedLstm
 from torch import nn
 from torch.utils.data.sampler import SubsetRandomSampler
+from sklearn.metrics import classification_report
 from tqdm import tqdm
 
 from dataset import ProielDataset
@@ -18,7 +19,8 @@ COMET_API_KEY = os.getenv('COMET_API_KEY')
 experiment = Experiment(
     api_key=COMET_API_KEY,
     project_name='deep-latin-tagger',
-    workspace='tylerkirby'
+    workspace='tylerkirby',
+    disabled=False
 )
 
 
@@ -31,6 +33,7 @@ class BayesianDropoutLSTM(nn.Module):
                  hidden_size=64,
                  recurrent_dropout_probability=0):
         super(BayesianDropoutLSTM, self).__init__()
+        self.X_lengths = X_lengths
         self.embedding_layer = nn.Embedding(vocab_size, embedding_dim)
         self.augmented_lstm = AugmentedLstm(
             input_size=embedding_dim,
@@ -39,11 +42,20 @@ class BayesianDropoutLSTM(nn.Module):
         )
         self.fc = nn.Linear(hidden_size, tag_size)
 
-    def forward(self, x):
+    def forward(self, x, X_lengths):
+        # Embed word tokens
         x = self.embedding_layer(x)
+        # Pack tokens to hide padded tokens from model
+        x = torch.nn.utils.rnn.pack_padded_sequence(x, X_lengths, batch_first=True, enforce_sorted=False)
+        # Pass packed tokens to RNN
         x, _ = self.augmented_lstm(x)
+        # Unpack tokens
+        x, _ = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True, total_length=237)
+        # Reshape and pass data to fully connected layer
+        x = x.contiguous()
+        x = x.view(-1, x.shape[2])
         x = self.fc(x)
-        return F.log_softmax(x, dim=2)
+        return x
 
 
 class StandardLSTM(nn.Module):
@@ -51,21 +63,31 @@ class StandardLSTM(nn.Module):
                  vocab_size,
                  tag_size,
                  X_lengths,
-                 embedding_dim=64,
+                 embedding_dim=16,
                  hidden_size=64,
-                 num_layers=5,
+                 num_layers=2,
                  dropout=0,
                  bidirectional=False):
         super(StandardLSTM, self).__init__()
+        self.X_lengths = X_lengths
         self.embedding_layer = nn.Embedding(vocab_size, embedding_dim)
         self.lstm = nn.LSTM(embedding_dim, hidden_size, num_layers, dropout=dropout, bidirectional=bidirectional)
         self.fc = nn.Linear(hidden_size, tag_size)
 
-    def forward(self, x):
+    def forward(self, x, X_lengths):
+        # Embed word tokens
         x = self.embedding_layer(x)
+        # Pack tokens to hide padded tokens from model
+        x = torch.nn.utils.rnn.pack_padded_sequence(x, X_lengths, batch_first=True, enforce_sorted=False)
+        # Pass packed tokens to RNN
         x, _ = self.lstm(x)
+        # Unpack tokens
+        x, _ = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True, total_length=237)
+        # Reshape and pass data to fully connected layer
+        x = x.contiguous()
+        x = x.view(-1, x.shape[2])
         x = self.fc(x)
-        return F.log_softmax(x, dim=2)
+        return x
 
 
 class StandardRNN(nn.Module):
@@ -73,9 +95,9 @@ class StandardRNN(nn.Module):
                  vocab_size,
                  tag_size,
                  X_lengths,
-                 embedding_dim=64,
+                 embedding_dim=16,
                  hidden_size=64,
-                 num_layers=5,
+                 num_layers=2,
                  dropout=0,
                  bidirectional=False):
         super(StandardRNN, self).__init__()
@@ -92,31 +114,12 @@ class StandardRNN(nn.Module):
         # Pass packed tokens to RNN
         x, _ = self.rnn(x)
         # Unpack tokens
-        x, _ = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True)
+        x, _ = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True, total_length=237)
         # Reshape and pass data to fully connected layer
         x = x.contiguous()
         x = x.view(-1, x.shape[2])
         x = self.fc(x)
-        return F.log_softmax(x, dim=1)
-
-def cross_entropy_loss_with_mask(y, y_hat, tag_size):
-    # Flatten y into single vector
-    y = y.view(-1)
-    y_hat = y_hat.view(-1, tag_size)
-
-    # Create mask on nonpadded tokens
-    mask = (y > 0).float()
-
-    # Total tokens
-    total_tokens = int(torch.sum(mask).data)
-
-    # pick the values for the label and zero out the rest with the mask
-    y_hat = y_hat[range(y_hat.shape[0]), y] * mask
-
-    # compute cross entropy loss which ignores all <PAD> tokens
-    cross_entropy_loss = -torch.sum(y_hat) / total_tokens
-
-    return cross_entropy_loss
+        return x
 
 
 if __name__ == '__main__':
@@ -127,9 +130,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-v', '--validation_split', default=0.2)
     parser.add_argument('-bs', '--batch_size', default=32)
-    parser.add_argument('-e', '--epochs', default=10)
+    parser.add_argument('-e', '--epochs', default=10, type=int)
     parser.add_argument('-m', '--model', default='standard_rnn')
-    parser.add_argument('-lr', '--learning_rate', default=0.0001)
+    parser.add_argument('-lr', '--learning_rate', default=0.00001)
     parser.add_argument('-c', '--use_cuda', default=False)
     args = parser.parse_args()
 
@@ -168,11 +171,9 @@ if __name__ == '__main__':
 
     train_sampler = SubsetRandomSampler(train_indices)
     valid_sampler = SubsetRandomSampler(val_indices)
-    test_sampler = SubsetRandomSampler(test_indices)
 
     train_loader = torch.utils.data.DataLoader(dataset, batch_size=BATCH_SIZE, sampler=train_sampler)
     validation_loader = torch.utils.data.DataLoader(dataset, batch_size=BATCH_SIZE, sampler=valid_sampler)
-    test_loader = torch.utils.data.DataLoader(dataset, batch_size=BATCH_SIZE, sampler=test_sampler)
 
     # Initialize model
     if MODEL == 'standard_rnn':
@@ -185,8 +186,8 @@ if __name__ == '__main__':
         raise Exception(f'{MODEL} is not a valid model')
 
     # Initialize optimizer
-    optimizer = optim.SGD(model.parameters(), lr=LEARNING_RATE, momentum=0.9)
-
+    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    criterion = nn.CrossEntropyLoss(ignore_index=0)
     model.to(device=device)
     
     # Training loop
@@ -198,44 +199,48 @@ if __name__ == '__main__':
                 X_lengths = [len([i for i in s if i > 0]) for s in sentences]
                 y_hat = model(sentences, X_lengths).view(-1, tag_size)
                 labels = labels.view(-1)
-                loss = cross_entropy_loss_with_mask(labels, y_hat, tag_size)
+                loss = criterion(y_hat, labels)
                 training_loss += loss
                 loss.backward()
                 optimizer.step()
             training_loss /= len(train_loader)
 
-    #         model.eval()
-    #         validation_loss = 0
-    #         for (sentences, labels) in (validation_loader):
-    #             y_hat = model(sentences).view(-1, tag_size)
-    #             labels = labels.view(-1)
-    #             loss = cross_entropy_loss_with_mask(labels, y_hat, tag_size)
-    #             validation_loss += loss
-    #         validation_loss /= len(validation_loader)
-    #         experiment.log_metric('train_loss', training_loss.detach().numpy(), step=e)
-    #         experiment.log_metric('val_loss', validation_loss.detach().numpy(), step=e)
-    #
-    # # Test loop
-    # with experiment.test():
-    #     model.eval()
-    #     test_loss = 0
-    #     for (sentences, labels) in (test_loader):
-    #         y_hat = model(sentences).view(-1, tag_size)
-    #         y_hat_classes = torch.argmax(y_hat, dim=1).tolist()
-    #         labels = labels.view(-1).tolist()
-    #         pad_indices = [i for i in range(len(labels)) if labels[i] == 0]
-    #         y_hat_classes = np.delete(y_hat_classes, pad_indices)
-    #         labels = np.delete(labels, pad_indices)
-    #
-    #         incorrect_tags = 0
-    #         for i in range(len(labels)):
-    #             if labels[i] != y_hat_classes[i]:
-    #                 incorrect_tags += 1
-    #         incorrect_tags /= len(labels)
-    #     test_loss /= len(test_loader)
-    #     experiment.log_metric('test_loss', test_loss)
-    #
-    #
-    #
-    #
-    #
+            model.eval()
+            validation_loss = 0
+            for (sentences, labels) in (validation_loader):
+                X_lengths = [len([i for i in s if i > 0]) for s in sentences]
+                y_hat = model(sentences, X_lengths).view(-1, tag_size)
+                labels = labels.view(-1)
+                loss = criterion(y_hat, labels)
+                validation_loss += loss
+            validation_loss /= len(validation_loader)
+            experiment.log_metric('train_loss', training_loss.detach().numpy(), step=e)
+            experiment.log_metric('val_loss', validation_loss.detach().numpy(), step=e)
+
+    # Test loop
+    with experiment.test():
+        model.eval()
+        test_sentences = []
+        test_labels = []
+        test_predictions = []
+        for i in test_indices:
+            sentence, labels = dataset[i]
+            X_lengths = [len([i for i in sentence if i > 0])]
+            y_hat = model(torch.tensor(sentence).view(1, -1), torch.tensor(X_lengths)).view(-1, tag_size)
+            y_hat_classes = torch.argmax(y_hat, dim=1).tolist()
+            test_sentences.append(sentence)
+            test_labels.append(labels)
+            test_predictions.append(y_hat_classes)
+        test_sentences = np.array(test_sentences).flatten().tolist()
+        test_labels = np.array(test_labels).flatten().tolist()
+        test_predictions = np.array(test_predictions).flatten().tolist()
+
+        # target_names = list(dataset.label_mapping.keys())[:-1]
+        # target_names.insert(0, 'pad_token')
+        print(classification_report(test_labels, test_predictions))
+
+
+
+
+
+
