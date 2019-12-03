@@ -240,7 +240,7 @@ if __name__ == '__main__':
             training_loss = 0
             for (sentences, labels) in (train_loader):
                 sentences, labels = sentences.to(device), labels.to(device)
-                X_lengths = [len([i for i in s if i > 0]) for s in sentences]
+                X_lengths = torch.tensor([len([i for i in s if i > 0]) for s in sentences]).float().to(device)
                 y_hat = model(sentences, X_lengths).view(-1, tag_size)
                 labels = labels.view(-1)
                 loss = criterion(y_hat, labels)
@@ -255,7 +255,7 @@ if __name__ == '__main__':
             validation_loss = 0
             for (sentences, labels) in (validation_loader):
                 sentences, labels = sentences.to(device), labels.to(device)
-                X_lengths = [len([i for i in s if i > 0]) for s in sentences]
+                X_lengths = torch.tensor([len([i for i in s if i > 0]) for s in sentences]).float().to(device)
                 y_hat = model(sentences, X_lengths).view(-1, tag_size)
                 labels = labels.view(-1)
                 loss = criterion(y_hat, labels)
@@ -270,7 +270,7 @@ if __name__ == '__main__':
     test_predictions = []
     for i in test_indices:
         sentence, labels = dataset[i]
-        sentence = sentence.to(device)
+        sentence = sentence
         X_lengths = [len([i for i in sentence if i > 0])]
         y_hat = model(torch.tensor(sentence).view(1, -1), torch.tensor(X_lengths)).view(-1, tag_size)
         y_hat_classes = torch.argmax(y_hat, dim=1).tolist()
