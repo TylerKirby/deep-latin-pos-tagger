@@ -28,8 +28,8 @@ class BayesianDropoutLSTM(nn.Module):
                  vocab_size,
                  tag_size,
                  X_lengths,
-                 embedding_dim=64,
-                 hidden_size=64,
+                 embedding_dim,
+                 hidden_size,
                  recurrent_dropout_probability=0):
         super(BayesianDropoutLSTM, self).__init__()
         self.X_lengths = X_lengths
@@ -62,15 +62,14 @@ class StandardLSTM(nn.Module):
                  vocab_size,
                  tag_size,
                  X_lengths,
-                 embedding_dim=16,
-                 hidden_size=64,
-                 num_layers=2,
-                 dropout=0,
-                 bidirectional=False):
+                 embedding_dim,
+                 hidden_size,
+                 num_layers,
+                 dropout=0):
         super(StandardLSTM, self).__init__()
         self.X_lengths = X_lengths
         self.embedding_layer = nn.Embedding(vocab_size, embedding_dim)
-        self.lstm = nn.LSTM(embedding_dim, hidden_size, num_layers, dropout=dropout, bidirectional=bidirectional)
+        self.lstm = nn.LSTM(embedding_dim, hidden_size, num_layers, dropout=dropout)
         self.fc = nn.Linear(hidden_size, tag_size)
 
     def forward(self, x, X_lengths):
@@ -94,15 +93,14 @@ class StandardRNN(nn.Module):
                  vocab_size,
                  tag_size,
                  X_lengths,
-                 embedding_dim=16,
-                 hidden_size=64,
-                 num_layers=2,
-                 dropout=0,
-                 bidirectional=False):
+                 embedding_dim,
+                 hidden_size,
+                 num_layers,
+                 dropout=0):
         super(StandardRNN, self).__init__()
         self.X_lengths = X_lengths
         self.embedding_layer = nn.Embedding(vocab_size, embedding_dim)
-        self.rnn = nn.RNN(embedding_dim, hidden_size, num_layers, dropout=dropout, bidirectional=bidirectional)
+        self.rnn = nn.RNN(embedding_dim, hidden_size, num_layers, dropout=dropout)
         self.fc = nn.Linear(hidden_size, tag_size)
 
     def forward(self, x, X_lengths):
@@ -127,12 +125,16 @@ if __name__ == '__main__':
 
     # Experiment parameters
     parser = argparse.ArgumentParser()
-    parser.add_argument('-v', '--validation_split', default=0.2)
-    parser.add_argument('-bs', '--batch_size', default=32)
+    parser.add_argument('-v', '--validation_split', default=0.2, type=float)
+    parser.add_argument('-bs', '--batch_size', default=32, type=int)
     parser.add_argument('-e', '--epochs', default=10, type=int)
-    parser.add_argument('-m', '--model', default='standard_rnn')
-    parser.add_argument('-lr', '--learning_rate', default=0.00001)
-    parser.add_argument('-c', '--use_cuda', default=False)
+    parser.add_argument('-m', '--model', default='standard_rnn', type=str)
+    parser.add_argument('-lr', '--learning_rate', default=0.00001, type=float)
+    parser.add_argument('-c', '--use_cuda', default=False, type=bool)
+    parser.add_argument('-em', '--embedding_size', default=16, type=int)
+    parser.add_argument('-hs', '--hidden_size', default=64, type=int)
+    parser.add_argument('-nl', '--number_of_layers', default=2, type=int)
+    parser.add_argument('-d', '--dropout', default=0, type=float)
     args = parser.parse_args()
 
     VALIDATION_SPLIT = args.validation_split
@@ -141,6 +143,24 @@ if __name__ == '__main__':
     MODEL = args.model
     LEARNING_RATE = args.learning_rate
     USE_CUDA = args.use_cuda
+    EMBEDDING_SIZE = args.embedding_size
+    HIDDEN_SIZE = args.hidden_size
+    NUMBER_OF_LAYERS = args.number_of_layers
+    DROPOUT = args.dropout
+
+    model_parameters = {
+        'validation_split': VALIDATION_SPLIT,
+        'batch_size': BATCH_SIZE,
+        'epochs': EPOCHS,
+        'model': MODEL,
+        'learning_rate': LEARNING_RATE,
+        'embedding_size': EMBEDDING_SIZE,
+        'hidden_size': HIDDEN_SIZE,
+        'number_of_layers': NUMBER_OF_LAYERS,
+        'dropout': DROPOUT
+    }
+
+    experiment.log_parameters(model_parameters)
 
     # Set device
     if USE_CUDA and torch.cuda.is_available():
@@ -176,11 +196,34 @@ if __name__ == '__main__':
 
     # Initialize model
     if MODEL == 'standard_rnn':
-        model = StandardRNN(vocab_size, tag_size, X_lengths)
+        model = StandardRNN(
+            vocab_size,
+            tag_size,
+            X_lengths,
+            EMBEDDING_SIZE,
+            HIDDEN_SIZE,
+            NUMBER_OF_LAYERS,
+            DROPOUT
+        )
     elif MODEL == 'standard_lstm':
-        model = StandardLSTM(vocab_size, tag_size, X_lengths)
+        model = StandardLSTM(
+            vocab_size,
+            tag_size,
+            X_lengths,
+            EMBEDDING_SIZE,
+            HIDDEN_SIZE,
+            NUMBER_OF_LAYERS,
+            DROPOUT
+        )
     elif MODEL == 'bayesian_lstm':
-        model = BayesianDropoutLSTM(vocab_size, tag_size, X_lengths)
+        model = BayesianDropoutLSTM(
+            vocab_size,
+            tag_size,
+            X_lengths,
+            EMBEDDING_SIZE,
+            HIDDEN_SIZE,
+            DROPOUT
+        )
     else:
         raise Exception(f'{MODEL} is not a valid model')
 
@@ -217,23 +260,31 @@ if __name__ == '__main__':
             experiment.log_metric('val_loss', validation_loss.detach().numpy(), step=e)
 
     # Test loop
-    with experiment.test():
-        model.eval()
-        test_sentences = []
-        test_labels = []
-        test_predictions = []
-        for i in test_indices:
-            sentence, labels = dataset[i]
-            X_lengths = [len([i for i in sentence if i > 0])]
-            y_hat = model(torch.tensor(sentence).view(1, -1), torch.tensor(X_lengths)).view(-1, tag_size)
-            y_hat_classes = torch.argmax(y_hat, dim=1).tolist()
-            non_padded_label_length = len([l for l in labels if l > 0])
-            test_sentences.append(sentence[:non_padded_label_length])
-            test_labels.append(labels[:non_padded_label_length])
-            test_predictions.append(y_hat_classes[:non_padded_label_length])
-        test_sentences = np.hstack(test_sentences)
-        test_labels = np.hstack(test_labels)
-        test_predictions = np.hstack(test_predictions)
+    model.eval()
+    test_sentences = []
+    test_labels = []
+    test_predictions = []
+    for i in test_indices:
+        sentence, labels = dataset[i]
+        X_lengths = [len([i for i in sentence if i > 0])]
+        y_hat = model(torch.tensor(sentence).view(1, -1), torch.tensor(X_lengths)).view(-1, tag_size)
+        y_hat_classes = torch.argmax(y_hat, dim=1).tolist()
+        non_padded_label_length = len([l for l in labels if l > 0])
+        test_sentences.append(sentence[:non_padded_label_length])
+        test_labels.append(labels[:non_padded_label_length])
+        test_predictions.append(y_hat_classes[:non_padded_label_length])
+    test_sentences = np.hstack(test_sentences)
+    test_labels = np.hstack(test_labels)
+    test_predictions = np.hstack(test_predictions)
 
-        print(classification_report(test_labels, test_predictions))
+    label_mappings = {v: k for k, v in dataset.label_mapping.items()}
+    labels = [label_mappings[i] for i in range(tag_size)]
 
+    classification_report = classification_report(test_labels, test_predictions, output_dict=True, labels=range(tag_size),target_names=labels)
+
+    for k, v in classification_report.items():
+        if k == 'accuracy':
+            experiment.log_metric('accuracy', v)
+        else:
+            for metric, value in v.items():
+                experiment.log_metric(f'{k}_{metric}', value)
