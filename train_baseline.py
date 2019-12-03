@@ -4,7 +4,6 @@ import argparse
 import os
 
 import numpy as np
-import torch.nn.functional as F
 import torch.optim as optim
 import torch
 from allennlp.modules.augmented_lstm import AugmentedLstm
@@ -21,6 +20,8 @@ experiment = Experiment(
     project_name='deep-latin-tagger',
     workspace='tylerkirby',
 )
+
+EXPERIMENT_HASH = experiment.get_key()
 
 
 class BayesianDropoutLSTM(nn.Module):
@@ -233,8 +234,8 @@ if __name__ == '__main__':
     model.to(device=device)
     
     # Training loop
-    with experiment.train():
-        for e in tqdm(range(EPOCHS)):
+    for e in tqdm(range(EPOCHS)):
+        with experiment.train():
             model.train()
             training_loss = 0
             for (sentences, labels) in (train_loader):
@@ -246,7 +247,9 @@ if __name__ == '__main__':
                 loss.backward()
                 optimizer.step()
             training_loss /= len(train_loader)
+            experiment.log_metric('loss', training_loss.detach().numpy(), step=e)
 
+        with experiment.validate():
             model.eval()
             validation_loss = 0
             for (sentences, labels) in (validation_loader):
@@ -256,8 +259,7 @@ if __name__ == '__main__':
                 loss = criterion(y_hat, labels)
                 validation_loss += loss
             validation_loss /= len(validation_loader)
-            experiment.log_metric('train_loss', training_loss.detach().numpy(), step=e)
-            experiment.log_metric('val_loss', validation_loss.detach().numpy(), step=e)
+            experiment.log_metric('loss', validation_loss.detach().numpy(), step=e)
 
     # Test loop
     model.eval()
@@ -273,14 +275,12 @@ if __name__ == '__main__':
         test_sentences.append(sentence[:non_padded_label_length])
         test_labels.append(labels[:non_padded_label_length])
         test_predictions.append(y_hat_classes[:non_padded_label_length])
-    test_sentences = np.hstack(test_sentences)
-    test_labels = np.hstack(test_labels)
-    test_predictions = np.hstack(test_predictions)
 
-    label_mappings = {v: k for k, v in dataset.label_mapping.items()}
-    labels = [label_mappings[i] for i in range(tag_size)]
+    # Create Classification report
+    label_mapping = {v: k for k, v in dataset.label_mapping.items()}
+    labels = [label_mapping[i] for i in range(tag_size)]
 
-    classification_report = classification_report(test_labels, test_predictions, output_dict=True, labels=range(tag_size),target_names=labels)
+    classification_report = classification_report(np.hstack(test_labels), np.hstack(test_predictions), output_dict=True, labels=range(tag_size),target_names=labels)
 
     for k, v in classification_report.items():
         if k == 'accuracy':
@@ -288,3 +288,17 @@ if __name__ == '__main__':
         else:
             for metric, value in v.items():
                 experiment.log_metric(f'{k}_{metric}', value)
+
+    # Print example sentences
+    vocab_mapping = {v: k for k,v in dataset.vocab_mapping.items()}
+    for i in range(3):
+        sentence = [vocab_mapping[t] for t in test_sentences[i]]
+        prediction = [label_mapping[t] for t in test_predictions[i]]
+        labels = [label_mapping[t] for t in test_labels[i]]
+        print(f'Example {i+1}:\nSentence: {sentence}\nPrediction: {prediction}\nLabels: {labels}')
+
+    # Save model
+    torch.save(model.state_dict(), f'model_{EXPERIMENT_HASH}.pt')
+    print(f'Saved model model_{EXPERIMENT_HASH}.pt')
+
+    experiment.validate()
