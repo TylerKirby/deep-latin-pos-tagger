@@ -20,7 +20,6 @@ experiment = Experiment(
     api_key=COMET_API_KEY,
     project_name='deep-latin-tagger',
     workspace='tylerkirby',
-    disabled=False
 )
 
 
@@ -228,19 +227,13 @@ if __name__ == '__main__':
             X_lengths = [len([i for i in sentence if i > 0])]
             y_hat = model(torch.tensor(sentence).view(1, -1), torch.tensor(X_lengths)).view(-1, tag_size)
             y_hat_classes = torch.argmax(y_hat, dim=1).tolist()
-            test_sentences.append(sentence)
-            test_labels.append(labels)
-            test_predictions.append(y_hat_classes)
-        test_sentences = np.array(test_sentences).flatten().tolist()
-        test_labels = np.array(test_labels).flatten().tolist()
-        test_predictions = np.array(test_predictions).flatten().tolist()
+            non_padded_label_length = len([l for l in labels if l > 0])
+            test_sentences.append(sentence[:non_padded_label_length])
+            test_labels.append(labels[:non_padded_label_length])
+            test_predictions.append(y_hat_classes[:non_padded_label_length])
+        test_sentences = np.hstack(test_sentences)
+        test_labels = np.hstack(test_labels)
+        test_predictions = np.hstack(test_predictions)
 
-        # target_names = list(dataset.label_mapping.keys())[:-1]
-        # target_names.insert(0, 'pad_token')
         print(classification_report(test_labels, test_predictions))
-
-
-
-
-
 
