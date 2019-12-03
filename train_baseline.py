@@ -248,7 +248,7 @@ if __name__ == '__main__':
                 loss.backward()
                 optimizer.step()
             training_loss /= len(train_loader)
-            experiment.log_metric('loss', training_loss.detach().numpy(), step=e)
+            experiment.log_metric('loss', training_loss.detach().cpu().numpy(), step=e)
 
         with experiment.validate():
             model.eval()
@@ -261,7 +261,7 @@ if __name__ == '__main__':
                 loss = criterion(y_hat, labels)
                 validation_loss += loss
             validation_loss /= len(validation_loader)
-            experiment.log_metric('loss', validation_loss.detach().numpy(), step=e)
+            experiment.log_metric('loss', validation_loss.detach().cpu().numpy(), step=e)
 
     # Test loop
     model.eval()
