@@ -172,7 +172,7 @@ if __name__ == '__main__':
         print('Using CPU')
 
     # Load data set and create vocabulary
-    dataset = ProielDataset('proiel.json')
+    dataset = ProielDataset('proiel.json', label='tag')
     dataset_size = len(dataset)
     vocab_size = len(dataset.vocab_mapping)
     tag_size = len(dataset.label_mapping)

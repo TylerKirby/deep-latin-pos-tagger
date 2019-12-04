@@ -11,7 +11,7 @@ class ProielDataset(Dataset):
         self.X, self.X_lengths, self.y, self.y_lengths, self.vocab_mapping, self.label_mapping = self.read_json()
 
     def read_json(self):
-        if self.label not in ['pos', 'morph']:
+        if self.label not in ['pos', 'tag']:
             raise Exception(f'{self.label} is not a valid option')
 
         with open(self.file) as f:
