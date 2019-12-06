@@ -264,6 +264,7 @@ if __name__ == '__main__':
             experiment.log_metric('loss', validation_loss.detach().cpu().numpy(), step=e)
 
     # Test loop
+    model.to(device=torch.device('cpu'))
     model.eval()
     test_sentences = []
     test_labels = []
